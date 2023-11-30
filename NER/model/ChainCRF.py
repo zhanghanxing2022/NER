@@ -1,6 +1,30 @@
+# import ChainCRF
+# import importlib
+# importlib.reload(ChainCRF)
+# from ChainCRF import ChainCRF
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class BLITM(nn.Module):
+    def __init__(self, num_classes, vocab_length, embedding_dim, hidden_dim):
+        super(BLITM, self).__init__()
+        self.embed = nn.Embedding(vocab_length, embedding_dim)
+        self.hidden_dim = hidden_dim
+        self.num_classes = num_classes
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim // 2,
+                            num_layers=1, bidirectional=True, batch_first=True)
+        self.hidden2tag = nn.Sequential(nn.Linear(hidden_dim, num_classes))
+
+    def forward(self, sentence):
+        embeds = self.embed(sentence)
+        lstm_out, _ = self.lstm(embeds)
+        emissions = self.hidden2tag(lstm_out)
+        return emissions
 
 
 class ChainCRF(nn.Module):
@@ -9,7 +33,8 @@ class ChainCRF(nn.Module):
         self.num_classes = num_classes
         # 定义转移矩阵 U、起始边界 b_start、结束边界 b_end
         if init_value:
-            self.U = nn.Parameter(torch.Tensor(init_value))
+            self.U = nn.Parameter(torch.full(
+                (num_classes, num_classes), init_value))
         else:
             self.U = nn.Parameter(torch.rand(num_classes, num_classes))
         self.b_start = nn.Parameter(torch.zeros(num_classes))
@@ -39,7 +64,8 @@ class ChainCRF(nn.Module):
         """
         : return [batch_size]
         """
-        true_tags_mask = F.one_hot(true_tags, self.num_classes).float()
+        true_tags_mask = F.one_hot(
+            (true_tags*mask).long(), self.num_classes).float()
         energy = true_tags_mask * emissions
         energy1 = self.F(energy, dim=2)
 
@@ -76,7 +102,7 @@ class ChainCRF(nn.Module):
         batch_size, seq_len, _ = emissions.size()
         for j in range(1, seq_len):
             # print(emissions[:, j, :].unsqueeze(2).shape)
-            # 32, 9, 1
+            # # 32, 9, 1
             # print(self.U.unsqueeze(0).shape)
             # 1 ,9, 9
             new_score = emissions[:, j, :].unsqueeze(1)
@@ -93,7 +119,7 @@ class ChainCRF(nn.Module):
             alpha_1 = alpha[:, j-1, :].unsqueeze(2)
             # print("alpha_1:", alpha_1)
             # print("alpha_1+transition_energy", alpha_1+transition_energy)
-            alpha[:, j, :] = torch.logsumexp(alpha_1+transition_energy, dim=2)
+            alpha[:, j, :] = torch.logsumexp(alpha_1+transition_energy, dim=1)
             # print("alpha:", alpha)
 
         free_energy = torch.logsumexp(alpha[:, -1, :], dim=1)
